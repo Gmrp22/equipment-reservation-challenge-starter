@@ -23,28 +23,9 @@ import {
 import { useEffect, useRef } from "react";
 import { useFieldArray, useForm } from "react-hook-form";
 import { createReservationSchema, type CreateReservationInput } from "@/schemas/create-reservation";
+import type { LocationWithEquipment } from "@/server/locations/list-locations";
 
-// Placeholder data — will be replaced by real Location/Equipment data from the server.
-const MOCK_LOCATIONS = [
-  {
-    id: "loc-austin",
-    name: "Austin Warehouse",
-    equipment: [
-      { id: "eq-generator-austin", name: "Generator" },
-      { id: "eq-concrete-saw-austin", name: "Concrete Saw" },
-    ],
-  },
-  {
-    id: "loc-dallas",
-    name: "Dallas Warehouse",
-    equipment: [
-      { id: "eq-generator-dallas", name: "Generator" },
-      { id: "eq-plate-compactor-dallas", name: "Plate Compactor" },
-    ],
-  },
-];
-
-export function CreateReservationForm() {
+export function CreateReservationForm({ locations }: { locations: LocationWithEquipment[] }) {
   const {
     register,
     control,
@@ -66,7 +47,7 @@ export function CreateReservationForm() {
   const { fields, append, remove } = useFieldArray({ control, name: "items" });
 
   const selectedLocationId = watch("locationId");
-  const selectedLocation = MOCK_LOCATIONS.find((location) => location.id === selectedLocationId);
+  const selectedLocation = locations.find((location) => location.id === selectedLocationId);
   const equipmentOptions = selectedLocation?.equipment ?? [];
 
   const previousLocationId = useRef(selectedLocationId);
@@ -103,7 +84,7 @@ export function CreateReservationForm() {
               <MenuItem value="" disabled>
                 Select a location
               </MenuItem>
-              {MOCK_LOCATIONS.map((location) => (
+              {locations.map((location) => (
                 <MenuItem key={location.id} value={location.id}>
                   {location.name}
                 </MenuItem>
@@ -172,7 +153,7 @@ export function CreateReservationForm() {
                     </MenuItem>
                     {equipmentOptions.map((equipment) => (
                       <MenuItem key={equipment.id} value={equipment.id}>
-                        {equipment.name}
+                        {equipment.name} ({equipment.totalQuantity} total)
                       </MenuItem>
                     ))}
                   </TextField>

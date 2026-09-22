@@ -1,8 +1,13 @@
 import ArrowBackIcon from "@mui/icons-material/ArrowBack";
 import { Box, Button, Stack, Typography } from "@mui/material";
 import { CreateReservationForm } from "@/features/reservations/create-reservation-form";
+import { listLocationsWithEquipment } from "@/server/locations/list-locations";
 
-export default function NewReservationPage() {
+export const dynamic = "force-dynamic";
+
+export default async function NewReservationPage() {
+  const locations = await listLocationsWithEquipment();
+
   return (
     <Stack spacing={3}>
       <Box>
@@ -17,7 +22,7 @@ export default function NewReservationPage() {
         </Typography>
       </Box>
 
-      <CreateReservationForm />
+      <CreateReservationForm locations={locations} />
     </Stack>
   );
 }
