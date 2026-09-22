@@ -20,9 +20,11 @@ import {
   TextField,
   Typography,
 } from "@mui/material";
+import { MobileDateTimePicker } from "@mui/x-date-pickers/MobileDateTimePicker";
+import dayjs, { type Dayjs } from "dayjs";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import { useFieldArray, useForm } from "react-hook-form";
+import { Controller, useFieldArray, useForm } from "react-hook-form";
 import { createReservationSchema, type CreateReservationInput } from "@/schemas/create-reservation";
 import type { LocationWithEquipment } from "@/server/locations/list-locations";
 import { submitCreateReservation } from "./create-reservation-client";
@@ -116,27 +118,53 @@ export function CreateReservationForm({ locations }: { locations: LocationWithEq
             </TextField>
 
             <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
-              <TextField
-                {...register("startAt")}
-                type="datetime-local"
-                label="Start"
-                required
-                fullWidth
-                disabled={isSubmitting}
-                slotProps={{ inputLabel: { shrink: true } }}
-                error={Boolean(errors.startAt)}
-                helperText={errors.startAt?.message}
+              <Controller
+                name="startAt"
+                control={control}
+                render={({ field }) => (
+                  <MobileDateTimePicker
+                    label="Start"
+                    value={field.value ? dayjs(field.value) : null}
+                    onChange={(date: Dayjs | null) => field.onChange(date?.toISOString() ?? "")}
+                    disabled={isSubmitting}
+                    ampm={false}
+                    timeSteps={{ minutes: 1 }}
+                    sx={{ width: "100%" }}
+                    slotProps={{
+                      textField: {
+                        required: true,
+                        fullWidth: true,
+                        error: Boolean(errors.startAt),
+                        helperText: errors.startAt?.message,
+                      },
+                      toolbar: { hidden: true },
+                    }}
+                  />
+                )}
               />
-              <TextField
-                {...register("endAt")}
-                type="datetime-local"
-                label="End"
-                required
-                fullWidth
-                disabled={isSubmitting}
-                slotProps={{ inputLabel: { shrink: true } }}
-                error={Boolean(errors.endAt)}
-                helperText={errors.endAt?.message}
+              <Controller
+                name="endAt"
+                control={control}
+                render={({ field }) => (
+                  <MobileDateTimePicker
+                    label="End"
+                    value={field.value ? dayjs(field.value) : null}
+                    onChange={(date: Dayjs | null) => field.onChange(date?.toISOString() ?? "")}
+                    disabled={isSubmitting}
+                    ampm={false}
+                    timeSteps={{ minutes: 1 }}
+                    sx={{ width: "100%" }}
+                    slotProps={{
+                      textField: {
+                        required: true,
+                        fullWidth: true,
+                        error: Boolean(errors.endAt),
+                        helperText: errors.endAt?.message,
+                      },
+                      toolbar: { hidden: true },
+                    }}
+                  />
+                )}
               />
             </Stack>
 
