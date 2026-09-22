@@ -8,6 +8,8 @@ export const reservationItemSchema = z.object({
     .positive("Quantity must be greater than zero."),
 });
 
+const ONE_YEAR_MS = 365 * 24 * 60 * 60 * 1000;
+
 export const createReservationSchema = z
   .object({
     locationId: z.string().min(1, "Select a location."),
@@ -19,6 +21,14 @@ export const createReservationSchema = z
   .refine((data) => new Date(data.endAt) > new Date(data.startAt), {
     message: "End must be after start.",
     path: ["endAt"],
+  })
+  .refine((data) => new Date(data.startAt).getTime() >= Date.now(), {
+    message: "Start must be in the future.",
+    path: ["startAt"],
+  })
+  .refine((data) => new Date(data.startAt).getTime() <= Date.now() + ONE_YEAR_MS, {
+    message: "Start must be within one year from now.",
+    path: ["startAt"],
   })
   .refine(
     (data) => new Set(data.items.map((item) => item.equipmentId)).size === data.items.length,

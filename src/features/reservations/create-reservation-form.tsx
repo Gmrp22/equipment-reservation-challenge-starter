@@ -125,7 +125,9 @@ export function CreateReservationForm({ locations }: { locations: LocationWithEq
                   <MobileDateTimePicker
                     label="Start"
                     value={field.value ? dayjs(field.value) : null}
-                    onChange={(date: Dayjs | null) => field.onChange(date?.toISOString() ?? "")}
+                    onChange={(date: Dayjs | null) =>
+                      field.onChange(date && date.isValid() ? date.toISOString() : "")
+                    }
                     disabled={isSubmitting}
                     ampm={false}
                     timeSteps={{ minutes: 1 }}
@@ -149,7 +151,9 @@ export function CreateReservationForm({ locations }: { locations: LocationWithEq
                   <MobileDateTimePicker
                     label="End"
                     value={field.value ? dayjs(field.value) : null}
-                    onChange={(date: Dayjs | null) => field.onChange(date?.toISOString() ?? "")}
+                    onChange={(date: Dayjs | null) =>
+                      field.onChange(date && date.isValid() ? date.toISOString() : "")
+                    }
                     disabled={isSubmitting}
                     ampm={false}
                     timeSteps={{ minutes: 1 }}
