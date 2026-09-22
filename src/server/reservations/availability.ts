@@ -74,3 +74,62 @@ export async function checkAvailability(
     availableQuantity,
   };
 }
+
+interface BatchAvailabilityInput {
+  locationId: string;
+  startAt: Date;
+  endAt: Date;
+  equipmentIds: string[];
+}
+
+/**
+ * Same result as calling getAvailableQuantity per equipment id, but resolved
+ * with 2 queries total instead of one pair of queries per item (avoids N+1
+ * when a reservation has several equipment items).
+ */
+export async function getAvailableQuantitiesByEquipment(
+  input: BatchAvailabilityInput,
+  client: PrismaClientOrTx = prisma,
+): Promise<Map<string, number>> {
+  if (input.endAt <= input.startAt) {
+    throw new DomainError("End time must be after start time.", 400, "INVALID_INTERVAL");
+  }
+
+  const equipmentList = await client.equipment.findMany({
+    where: { id: { in: input.equipmentIds }, locationId: input.locationId },
+    select: { id: true, totalQuantity: true },
+  });
+
+  const reservations = await client.reservation.findMany({
+    where: {
+      locationId: input.locationId,
+      status: "CONFIRMED",
+      startAt: { lt: input.endAt },
+      endAt: { gt: input.startAt },
+      items: { some: { equipmentId: { in: input.equipmentIds } } },
+    },
+    select: {
+      items: {
+        where: { equipmentId: { in: input.equipmentIds } },
+        select: { equipmentId: true, quantity: true },
+      },
+    },
+  });
+
+  const reservedQuantityByEquipmentId = new Map<string, number>();
+  for (const reservation of reservations) {
+    for (const item of reservation.items) {
+      reservedQuantityByEquipmentId.set(
+        item.equipmentId,
+        (reservedQuantityByEquipmentId.get(item.equipmentId) ?? 0) + item.quantity,
+      );
+    }
+  }
+
+  return new Map(
+    equipmentList.map((equipment) => [
+      equipment.id,
+      Math.max(0, equipment.totalQuantity - (reservedQuantityByEquipmentId.get(equipment.id) ?? 0)),
+    ]),
+  );
+}

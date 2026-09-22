@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { DomainError } from "@/lib/domain-error";
 import type { CreateReservationInput } from "@/schemas/create-reservation";
-import { checkAvailability } from "./availability";
+import { getAvailableQuantitiesByEquipment } from "./availability";
 
 export async function createReservation(
   input: CreateReservationInput,
@@ -36,19 +36,15 @@ export async function createReservation(
 
   const reservation = await prisma.$transaction(async (tx) => {
     if (input.status === "CONFIRMED") {
-      for (const item of input.items) {
-        const { available, availableQuantity } = await checkAvailability(
-          {
-            locationId: input.locationId,
-            equipmentId: item.equipmentId,
-            startAt,
-            endAt,
-            requestedQuantity: item.quantity,
-          },
-          tx,
-        );
+      const availableQuantityByEquipmentId = await getAvailableQuantitiesByEquipment(
+        { locationId: input.locationId, startAt, endAt, equipmentIds },
+        tx,
+      );
 
-        if (!available) {
+      for (const item of input.items) {
+        const availableQuantity = availableQuantityByEquipmentId.get(item.equipmentId) ?? 0;
+
+        if (item.quantity > availableQuantity) {
           const equipmentName = equipmentNameById.get(item.equipmentId) ?? "This equipment";
           throw new DomainError(
             `Only ${availableQuantity} ${equipmentName} available for the selected period.`,
