@@ -1,5 +1,8 @@
+import { Prisma } from "@/generated/prisma/client";
 import { DomainError } from "@/lib/domain-error";
 import { prisma } from "@/lib/prisma";
+
+type PrismaClientOrTx = typeof prisma | Prisma.TransactionClient;
 
 interface AvailabilityInput {
   locationId: string;
@@ -12,14 +15,17 @@ interface AvailabilityCheckInput extends AvailabilityInput {
   requestedQuantity: number;
 }
 
-export async function getAvailableQuantity(input: AvailabilityInput): Promise<number> {
+export async function getAvailableQuantity(
+  input: AvailabilityInput,
+  client: PrismaClientOrTx = prisma,
+): Promise<number> {
   if (input.endAt <= input.startAt) {
     throw new DomainError("End time must be after start time.", 400, "INVALID_INTERVAL");
   }
 
-  const equipment = await prisma.equipment.findFirst({
+  const equipment = await client.equipment.findFirst({
     where: { id: input.equipmentId, locationId: input.locationId },
-    select: { totalQuantity: true },
+    select: { totalQuantity: true, name: true },
   });
 
   if (!equipment) {
@@ -30,13 +36,12 @@ export async function getAvailableQuantity(input: AvailabilityInput): Promise<nu
     );
   }
 
-  // Availability behavior is part of the candidate challenge.
-  const reservations = await prisma.reservation.findMany({
+  const reservations = await client.reservation.findMany({
     where: {
       locationId: input.locationId,
       status: "CONFIRMED",
-      startAt: { lte: input.endAt },
-      endAt: { gte: input.startAt },
+      startAt: { lt: input.endAt },
+      endAt: { gt: input.startAt },
       items: { some: { equipmentId: input.equipmentId } },
     },
     select: {
@@ -57,14 +62,80 @@ export async function getAvailableQuantity(input: AvailabilityInput): Promise<nu
 
 export async function checkAvailability(
   input: AvailabilityCheckInput,
+  client: PrismaClientOrTx = prisma,
 ): Promise<{ available: boolean; availableQuantity: number }> {
   if (!Number.isInteger(input.requestedQuantity) || input.requestedQuantity <= 0) {
     throw new DomainError("Quantity must be a positive whole number.", 400, "INVALID_QUANTITY");
   }
 
-  const availableQuantity = await getAvailableQuantity(input);
+  const availableQuantity = await getAvailableQuantity(input, client);
   return {
     available: input.requestedQuantity <= availableQuantity,
     availableQuantity,
   };
+}
+
+interface BatchAvailabilityInput {
+  locationId: string;
+  startAt: Date;
+  endAt: Date;
+  equipmentIds: string[];
+  /**
+   * When editing an existing reservation, its own items must not count
+   * against itself in the availability calculation.
+   */
+  excludeReservationId?: string;
+}
+
+/**
+ * Same result as calling getAvailableQuantity per equipment id, but resolved
+ * with 2 queries total instead of one pair of queries per item (avoids N+1
+ * when a reservation has several equipment items).
+ */
+export async function getAvailableQuantitiesByEquipment(
+  input: BatchAvailabilityInput,
+  client: PrismaClientOrTx = prisma,
+): Promise<Map<string, number>> {
+  if (input.endAt <= input.startAt) {
+    throw new DomainError("End time must be after start time.", 400, "INVALID_INTERVAL");
+  }
+
+  const equipmentList = await client.equipment.findMany({
+    where: { id: { in: input.equipmentIds }, locationId: input.locationId },
+    select: { id: true, totalQuantity: true },
+  });
+
+  const reservations = await client.reservation.findMany({
+    where: {
+      locationId: input.locationId,
+      status: "CONFIRMED",
+      startAt: { lt: input.endAt },
+      endAt: { gt: input.startAt },
+      items: { some: { equipmentId: { in: input.equipmentIds } } },
+      ...(input.excludeReservationId ? { id: { not: input.excludeReservationId } } : {}),
+    },
+    select: {
+      items: {
+        where: { equipmentId: { in: input.equipmentIds } },
+        select: { equipmentId: true, quantity: true },
+      },
+    },
+  });
+
+  const reservedQuantityByEquipmentId = new Map<string, number>();
+  for (const reservation of reservations) {
+    for (const item of reservation.items) {
+      reservedQuantityByEquipmentId.set(
+        item.equipmentId,
+        (reservedQuantityByEquipmentId.get(item.equipmentId) ?? 0) + item.quantity,
+      );
+    }
+  }
+
+  return new Map(
+    equipmentList.map((equipment) => [
+      equipment.id,
+      Math.max(0, equipment.totalQuantity - (reservedQuantityByEquipmentId.get(equipment.id) ?? 0)),
+    ]),
+  );
 }
