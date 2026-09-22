@@ -80,6 +80,11 @@ interface BatchAvailabilityInput {
   startAt: Date;
   endAt: Date;
   equipmentIds: string[];
+  /**
+   * When editing an existing reservation, its own items must not count
+   * against itself in the availability calculation.
+   */
+  excludeReservationId?: string;
 }
 
 /**
@@ -107,6 +112,7 @@ export async function getAvailableQuantitiesByEquipment(
       startAt: { lt: input.endAt },
       endAt: { gt: input.startAt },
       items: { some: { equipmentId: { in: input.equipmentIds } } },
+      ...(input.excludeReservationId ? { id: { not: input.excludeReservationId } } : {}),
     },
     select: {
       items: {

@@ -27,28 +27,42 @@ import { useEffect, useRef, useState } from "react";
 import { Controller, useFieldArray, useForm } from "react-hook-form";
 import { createReservationSchema, type CreateReservationInput } from "@/schemas/create-reservation";
 import type { LocationWithEquipment } from "@/server/locations/list-locations";
-import { submitCreateReservation } from "./create-reservation-client";
+import type { ReservationForEdit } from "@/server/reservations/get-reservation-for-edit";
+import { submitCreateReservation, submitUpdateReservation } from "./create-reservation-client";
 import { useAvailabilityPreview } from "./use-availability-preview";
 
-export function CreateReservationForm({ locations }: { locations: LocationWithEquipment[] }) {
+export function CreateReservationForm({
+  locations,
+  reservation,
+}: {
+  locations: LocationWithEquipment[];
+  reservation?: ReservationForEdit;
+}) {
   const router = useRouter();
   const [serverError, setServerError] = useState<string | null>(null);
   const {
-    register,
     control,
     watch,
     setValue,
     handleSubmit,
-    formState: { errors, isSubmitting },
+    formState: { errors, isSubmitting, isDirty },
   } = useForm<CreateReservationInput>({
     resolver: zodResolver(createReservationSchema),
-    defaultValues: {
-      locationId: "",
-      startAt: "",
-      endAt: "",
-      status: "DRAFT",
-      items: [{ equipmentId: "", quantity: 1 }],
-    },
+    defaultValues: reservation
+      ? {
+          locationId: reservation.locationId,
+          startAt: reservation.startAt,
+          endAt: reservation.endAt,
+          status: reservation.status,
+          items: reservation.items,
+        }
+      : {
+          locationId: "",
+          startAt: "",
+          endAt: "",
+          status: "DRAFT",
+          items: [{ equipmentId: "", quantity: 1 }],
+        },
   });
 
   const { fields, append, remove } = useFieldArray({ control, name: "items" });
@@ -69,15 +83,24 @@ export function CreateReservationForm({ locations }: { locations: LocationWithEq
     }
   }, [selectedLocationId, fields, setValue]);
 
-  const availabilityByEquipmentId = useAvailabilityPreview(selectedLocationId, startAt, endAt);
+  const availabilityByEquipmentId = useAvailabilityPreview(
+    selectedLocationId,
+    startAt,
+    endAt,
+    reservation?.id,
+  );
 
   async function onSubmit(input: CreateReservationInput) {
     setServerError(null);
 
-    const result = await submitCreateReservation(input);
+    const result = reservation
+      ? await submitUpdateReservation(reservation.id, input)
+      : await submitCreateReservation(input);
 
     if (!result.success) {
-      setServerError(result.error ?? "The reservation could not be created.");
+      setServerError(
+        result.error ?? `The reservation could not be ${reservation ? "updated" : "created"}.`,
+      );
       return;
     }
 
@@ -96,26 +119,31 @@ export function CreateReservationForm({ locations }: { locations: LocationWithEq
               </Alert>
             ) : null}
 
-            <TextField
-              {...register("locationId")}
-              value={selectedLocationId ?? ""}
-              select
-              label="Location"
-              required
-              fullWidth
-              disabled={isSubmitting}
-              error={Boolean(errors.locationId)}
-              helperText={errors.locationId?.message}
-            >
-              <MenuItem value="" disabled>
-                Select a location
-              </MenuItem>
-              {locations.map((location) => (
-                <MenuItem key={location.id} value={location.id}>
-                  {location.name}
-                </MenuItem>
-              ))}
-            </TextField>
+            <Controller
+              name="locationId"
+              control={control}
+              render={({ field }) => (
+                <TextField
+                  {...field}
+                  select
+                  label="Location"
+                  required
+                  fullWidth
+                  disabled={isSubmitting}
+                  error={Boolean(errors.locationId)}
+                  helperText={errors.locationId?.message}
+                >
+                  <MenuItem value="" disabled>
+                    Select a location
+                  </MenuItem>
+                  {locations.map((location) => (
+                    <MenuItem key={location.id} value={location.id}>
+                      {location.name}
+                    </MenuItem>
+                  ))}
+                </TextField>
+              )}
+            />
 
             <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
               <Controller
@@ -190,47 +218,62 @@ export function CreateReservationForm({ locations }: { locations: LocationWithEq
                   spacing={2}
                   sx={{ alignItems: { sm: "flex-start" } }}
                 >
-                  <TextField
-                    {...register(`items.${index}.equipmentId`)}
-                    value={watch(`items.${index}.equipmentId`) ?? ""}
-                    select
-                    label="Equipment"
-                    required
-                    fullWidth
-                    disabled={isSubmitting || !selectedLocationId}
-                    error={Boolean(errors.items?.[index]?.equipmentId)}
-                    helperText={
-                      errors.items?.[index]?.equipmentId?.message ??
-                      (!selectedLocationId ? "Select a location first" : undefined)
-                    }
-                  >
-                    <MenuItem value="" disabled>
-                      Select equipment
-                    </MenuItem>
-                    {equipmentOptions.map((equipment) => {
-                      const available = availabilityByEquipmentId[equipment.id];
-                      const label =
-                        available === undefined
-                          ? `${equipment.name} (${equipment.totalQuantity} total)`
-                          : `${equipment.name} (${available} available)`;
-                      return (
-                        <MenuItem key={equipment.id} value={equipment.id}>
-                          {label}
+                  <Controller
+                    name={`items.${index}.equipmentId`}
+                    control={control}
+                    render={({ field }) => (
+                      <TextField
+                        {...field}
+                        select
+                        label="Equipment"
+                        required
+                        fullWidth
+                        disabled={isSubmitting || !selectedLocationId}
+                        error={Boolean(errors.items?.[index]?.equipmentId)}
+                        helperText={
+                          errors.items?.[index]?.equipmentId?.message ??
+                          (!selectedLocationId ? "Select a location first" : undefined)
+                        }
+                      >
+                        <MenuItem value="" disabled>
+                          Select equipment
                         </MenuItem>
-                      );
-                    })}
-                  </TextField>
+                        {equipmentOptions.map((equipment) => {
+                          const available = availabilityByEquipmentId[equipment.id];
+                          const label =
+                            available === undefined
+                              ? `${equipment.name} (${equipment.totalQuantity} total)`
+                              : `${equipment.name} (${available} available)`;
+                          return (
+                            <MenuItem key={equipment.id} value={equipment.id}>
+                              {label}
+                            </MenuItem>
+                          );
+                        })}
+                      </TextField>
+                    )}
+                  />
 
-                  <TextField
-                    {...register(`items.${index}.quantity`, { valueAsNumber: true })}
-                    type="number"
-                    label="Quantity"
-                    required
-                    disabled={isSubmitting}
-                    slotProps={{ htmlInput: { min: 1, step: 1 } }}
-                    sx={{ minWidth: { sm: 140 } }}
-                    error={Boolean(errors.items?.[index]?.quantity)}
-                    helperText={errors.items?.[index]?.quantity?.message}
+                  <Controller
+                    name={`items.${index}.quantity`}
+                    control={control}
+                    render={({ field }) => (
+                      <TextField
+                        {...field}
+                        value={field.value ?? ""}
+                        onChange={(event) =>
+                          field.onChange((event.target as HTMLInputElement).valueAsNumber)
+                        }
+                        type="number"
+                        label="Quantity"
+                        required
+                        disabled={isSubmitting}
+                        slotProps={{ htmlInput: { min: 1, step: 1 } }}
+                        sx={{ minWidth: { sm: 140 } }}
+                        error={Boolean(errors.items?.[index]?.quantity)}
+                        helperText={errors.items?.[index]?.quantity?.message}
+                      />
+                    )}
                   />
 
                   <IconButton
@@ -258,24 +301,36 @@ export function CreateReservationForm({ locations }: { locations: LocationWithEq
 
             <Divider />
 
-            <FormControl disabled={isSubmitting}>
-              <FormLabel id="status-label">Status</FormLabel>
-              <RadioGroup row aria-labelledby="status-label" defaultValue="DRAFT">
-                <FormControlLabel value="DRAFT" control={<Radio {...register("status")} />} label="Draft" />
-                <FormControlLabel
-                  value="CONFIRMED"
-                  control={<Radio {...register("status")} />}
-                  label="Confirmed"
-                />
-              </RadioGroup>
-            </FormControl>
+            <Controller
+              name="status"
+              control={control}
+              render={({ field }) => (
+                <FormControl disabled={isSubmitting}>
+                  <FormLabel id="status-label">Status</FormLabel>
+                  <RadioGroup row aria-labelledby="status-label" {...field}>
+                    <FormControlLabel value="DRAFT" control={<Radio />} label="Draft" />
+                    <FormControlLabel value="CONFIRMED" control={<Radio />} label="Confirmed" />
+                  </RadioGroup>
+                </FormControl>
+              )}
+            />
 
             <Stack direction="row" spacing={2} sx={{ justifyContent: "flex-end" }}>
               <Button href="/" disabled={isSubmitting}>
                 Cancel
               </Button>
-              <Button type="submit" variant="contained" disabled={isSubmitting}>
-                {isSubmitting ? "Creating…" : "Create reservation"}
+              <Button
+                type="submit"
+                variant="contained"
+                disabled={isSubmitting || (Boolean(reservation) && !isDirty)}
+              >
+                {isSubmitting
+                  ? reservation
+                    ? "Saving…"
+                    : "Creating…"
+                  : reservation
+                    ? "Save changes"
+                    : "Create reservation"}
               </Button>
             </Stack>
           </Stack>

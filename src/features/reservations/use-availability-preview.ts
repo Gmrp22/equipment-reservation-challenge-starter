@@ -9,6 +9,7 @@ export function useAvailabilityPreview(
   locationId: string | undefined,
   startAt: string | undefined,
   endAt: string | undefined,
+  excludeReservationId?: string,
 ): Record<string, number> {
   const [availabilityByEquipmentId, setAvailabilityByEquipmentId] =
     useState<Record<string, number>>(EMPTY_AVAILABILITY);
@@ -20,7 +21,7 @@ export function useAvailabilityPreview(
 
     const controller = new AbortController();
     const timeoutId = setTimeout(() => {
-      fetchAvailability({ locationId, startAt, endAt }, controller.signal)
+      fetchAvailability({ locationId, startAt, endAt, excludeReservationId }, controller.signal)
         .then((availability) => {
           if (availability) setAvailabilityByEquipmentId(availability);
         })
@@ -33,7 +34,7 @@ export function useAvailabilityPreview(
       controller.abort();
       clearTimeout(timeoutId);
     };
-  }, [isValidRange, locationId, startAt, endAt]);
+  }, [isValidRange, locationId, startAt, endAt, excludeReservationId]);
 
   return isValidRange ? availabilityByEquipmentId : EMPTY_AVAILABILITY;
 }

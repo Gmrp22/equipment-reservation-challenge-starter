@@ -11,6 +11,7 @@ export async function GET(request: Request): Promise<NextResponse> {
       locationId: searchParams.get("locationId"),
       startAt: searchParams.get("startAt"),
       endAt: searchParams.get("endAt"),
+      excludeReservationId: searchParams.get("excludeReservationId") ?? undefined,
     });
 
     if (!parsed.success) {
@@ -23,7 +24,7 @@ export async function GET(request: Request): Promise<NextResponse> {
       );
     }
 
-    const { locationId, startAt, endAt } = parsed.data;
+    const { locationId, startAt, endAt, excludeReservationId } = parsed.data;
 
     const equipment = await prisma.equipment.findMany({
       where: { locationId },
@@ -35,6 +36,7 @@ export async function GET(request: Request): Promise<NextResponse> {
       startAt: new Date(startAt),
       endAt: new Date(endAt),
       equipmentIds: equipment.map((item) => item.id),
+      excludeReservationId,
     });
 
     return NextResponse.json({
