@@ -25,10 +25,8 @@ import { useEffect, useRef, useState } from "react";
 import { useFieldArray, useForm } from "react-hook-form";
 import { createReservationSchema, type CreateReservationInput } from "@/schemas/create-reservation";
 import type { LocationWithEquipment } from "@/server/locations/list-locations";
-
-interface ApiErrorBody {
-  error?: string;
-}
+import { submitCreateReservation } from "./create-reservation-client";
+import { useAvailabilityPreview } from "./use-availability-preview";
 
 export function CreateReservationForm({ locations }: { locations: LocationWithEquipment[] }) {
   const router = useRouter();
@@ -54,6 +52,8 @@ export function CreateReservationForm({ locations }: { locations: LocationWithEq
   const { fields, append, remove } = useFieldArray({ control, name: "items" });
 
   const selectedLocationId = watch("locationId");
+  const startAt = watch("startAt");
+  const endAt = watch("endAt");
   const selectedLocation = locations.find((location) => location.id === selectedLocationId);
   const equipmentOptions = selectedLocation?.equipment ?? [];
 
@@ -67,27 +67,20 @@ export function CreateReservationForm({ locations }: { locations: LocationWithEq
     }
   }, [selectedLocationId, fields, setValue]);
 
+  const availabilityByEquipmentId = useAvailabilityPreview(selectedLocationId, startAt, endAt);
+
   async function onSubmit(input: CreateReservationInput) {
     setServerError(null);
 
-    try {
-      const response = await fetch("/api/reservations", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(input),
-      });
-      const body = (await response.json()) as ApiErrorBody;
+    const result = await submitCreateReservation(input);
 
-      if (!response.ok) {
-        setServerError(body.error ?? "The reservation could not be created.");
-        return;
-      }
-
-      router.push("/");
-      router.refresh();
-    } catch {
-      setServerError("The server could not be reached. Please try again.");
+    if (!result.success) {
+      setServerError(result.error ?? "The reservation could not be created.");
+      return;
     }
+
+    router.push("/");
+    router.refresh();
   }
 
   return (
@@ -182,11 +175,18 @@ export function CreateReservationForm({ locations }: { locations: LocationWithEq
                     <MenuItem value="" disabled>
                       Select equipment
                     </MenuItem>
-                    {equipmentOptions.map((equipment) => (
-                      <MenuItem key={equipment.id} value={equipment.id}>
-                        {equipment.name} ({equipment.totalQuantity} total)
-                      </MenuItem>
-                    ))}
+                    {equipmentOptions.map((equipment) => {
+                      const available = availabilityByEquipmentId[equipment.id];
+                      const label =
+                        available === undefined
+                          ? `${equipment.name} (${equipment.totalQuantity} total)`
+                          : `${equipment.name} (${available} available)`;
+                      return (
+                        <MenuItem key={equipment.id} value={equipment.id}>
+                          {label}
+                        </MenuItem>
+                      );
+                    })}
                   </TextField>
 
                   <TextField
