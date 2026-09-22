@@ -22,6 +22,9 @@ import {
 } from "@mui/material";
 import { MobileDateTimePicker } from "@mui/x-date-pickers/MobileDateTimePicker";
 import dayjs, { type Dayjs } from "dayjs";
+import utc from "dayjs/plugin/utc";
+
+dayjs.extend(utc);
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { Controller, useFieldArray, useForm } from "react-hook-form";
@@ -151,13 +154,14 @@ export function CreateReservationForm({
                 control={control}
                 render={({ field }) => (
                   <MobileDateTimePicker
-                    label="Start"
-                    value={field.value ? dayjs(field.value) : null}
+                    label="Start (UTC)"
+                    value={field.value ? dayjs.utc(field.value) : null}
                     onChange={(date: Dayjs | null) =>
-                      field.onChange(date && date.isValid() ? date.toISOString() : "")
+                      field.onChange(date && date.isValid() ? date.utc().toISOString() : "")
                     }
                     disabled={isSubmitting}
                     ampm={false}
+                    timezone="UTC"
                     timeSteps={{ minutes: 1 }}
                     sx={{ width: "100%" }}
                     slotProps={{
@@ -177,13 +181,14 @@ export function CreateReservationForm({
                 control={control}
                 render={({ field }) => (
                   <MobileDateTimePicker
-                    label="End"
-                    value={field.value ? dayjs(field.value) : null}
+                    label="End (UTC)"
+                    value={field.value ? dayjs.utc(field.value) : null}
                     onChange={(date: Dayjs | null) =>
-                      field.onChange(date && date.isValid() ? date.toISOString() : "")
+                      field.onChange(date && date.isValid() ? date.utc().toISOString() : "")
                     }
                     disabled={isSubmitting}
                     ampm={false}
+                    timezone="UTC"
                     timeSteps={{ minutes: 1 }}
                     sx={{ width: "100%" }}
                     slotProps={{
@@ -260,10 +265,11 @@ export function CreateReservationForm({
                     render={({ field }) => (
                       <TextField
                         {...field}
-                        value={field.value ?? ""}
-                        onChange={(event) =>
-                          field.onChange((event.target as HTMLInputElement).valueAsNumber)
-                        }
+                        value={Number.isNaN(field.value) ? "" : (field.value ?? "")}
+                        onChange={(event) => {
+                          const nextValue = (event.target as HTMLInputElement).valueAsNumber;
+                          field.onChange(Number.isNaN(nextValue) ? "" : nextValue);
+                        }}
                         type="number"
                         label="Quantity"
                         required
