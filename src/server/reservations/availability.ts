@@ -35,8 +35,8 @@ export async function getAvailableQuantity(input: AvailabilityInput): Promise<nu
     where: {
       locationId: input.locationId,
       status: "CONFIRMED",
-      startAt: { lte: input.endAt },
-      endAt: { gte: input.startAt },
+      startAt: { lt: input.endAt },
+      endAt: { gt: input.startAt },
       items: { some: { equipmentId: input.equipmentId } },
     },
     select: {
