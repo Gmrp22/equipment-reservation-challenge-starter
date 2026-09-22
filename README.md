@@ -1,93 +1,49 @@
-# Equipment Reservation Challenge - Starter
+# Equipment Reservation — Solution
 
-Starter application for the **Senior Full Stack Developer Take Home Assessment**. The assessment is designed for **4–6 focused hours** and uses only local, free, open-source tooling.
+Take-home assessment: fix reservation availability, implement Create Reservation end-to-end, and (bonus) Edit Reservation.
 
-## Requirements
+## Setup
 
-- Node.js 22 (see `.nvmrc`)
-- pnpm 11 (the exact package-manager version is pinned in `package.json`)
-
-## Quick Start
+Requirements: Node.js 22, pnpm.
 
 ```bash
 pnpm install
-pnpm db:setup
+pnpm db:setup   # generates Prisma client, applies schema, seeds SQLite
 pnpm dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000). No separate environment setup is required. The application defaults to a local SQLite database at `dev.db`; `DATABASE_URL` may optionally override it.
+Open [http://localhost:3000](http://localhost:3000). No environment variables or external services are required.
 
-## Database Setup
+To reset the database to the original seed data at any point: `pnpm db:seed`.
 
-`pnpm db:setup` generates the Prisma client, applies the schema to SQLite, and loads deterministic starter data. To restore that known state later, run:
+## Assumptions
 
-```bash
-pnpm db:reset
-```
+- No authentication exists, so there is no concept of "logged-in user." `locationId` always comes from an explicit dropdown selection, never inferred.
+- A `DRAFT` reservation can request any quantity, including more than physically exists — it is a placeholder, not a commitment, so it never touches availability. Only `CONFIRMED` reservations are checked and blocked.
+- A reservation's `startAt` cannot be in the past, and cannot be more than one year in the future. This isn't in the PDF; it's a sanity rule I added because nothing else prevented booking decades ahead.
+- The starter app assumes low traffic and few locations/equipment types (a handful per location). Several implementation choices below trade scalability for simplicity on that basis, and are called out as such.
 
-Use `pnpm db:seed` to reload the deterministic seed without recreating the schema. Both reset and seed replace local reservation data.
+## Technical decisions
 
-## Project Overview
+- **Overlap fix (Ticket 1):** the original query used `lte`/`gte` (inclusive) for the overlap check, so a reservation ending exactly when another begins was incorrectly flagged as a conflict. Changed to strict `lt`/`gt`, matching the `[start, end)` semantics the PDF specifies.
+- **Atomic writes:** `createReservation`/`updateReservation` wrap validation *and* the write in one `prisma.$transaction`. Availability is re-checked with the same transaction client right before writing, so the check and the write see a consistent snapshot — no separate "check now, hope nothing changed" step.
+- **Batched availability, no N+1:** a reservation can have several equipment items. Instead of querying availability once per item, `getAvailableQuantitiesByEquipment` resolves all items in 2 queries total (`equipmentId IN (...)`), regardless of how many items the reservation has.
+- **Edit reuses Create, not a duplicate form:** `CreateReservationForm` takes an optional `reservation` prop. When present, it pre-fills the form, calls `PUT` instead of `POST`, and the availability check passes `excludeReservationId` so a reservation being edited doesn't conflict with itself.
+- **Live availability preview:** the create/edit form calls `GET /api/availability` (debounced 400ms, cancels in-flight requests) so the equipment dropdown shows real remaining quantity for the selected dates, not just the total. The server re-validates independently on submit regardless of what the preview showed.
+- **Locations fetched directly from Prisma, no API route:** the new-reservation page is a Server Component, so it calls `listLocationsWithEquipment()` directly — no need to round-trip through an API just to read data the page itself will render.
+- **Date/time input:** used `@mui/x-date-pickers` (free tier, not the paid MUI X components) instead of the native `datetime-local` input, mainly to get a consistent 24h format — the native input's AM/PM-vs-24h display depends on the browser/OS locale, which was confusing during testing.
 
-- A **Location** owns equipment and reservations.
-- **Equipment** has a total quantity at one location.
-- A **Reservation** covers a time interval at one location and is either `DRAFT` or `CONFIRMED`.
-- A **ReservationItem** explicitly links a reservation to equipment with a requested quantity.
-- Only `CONFIRMED` reservations consume availability.
+## Trade-offs / incomplete work
 
-The seeded reservation list is complete starter functionality. The note editor is a small, working mutation example; it is not one of the assessment tickets.
+- **No success toast/snackbar.** I tried a Snackbar for "reservation created"/"note saved" a few times and it kept fighting the MUI Dialog focus/state — that's not worth this project's remaining time, so the form just redirects. This is the one polish item I'd revisit first with more time.
+- **Equipment quantity column ("2x Generator, 1x Saw") in the list table** is a single comma-separated string. It's fine at this scale but doesn't scale well visually with many items — a small nested table or chip list would read better.
+- **Locations/equipment are loaded in full on every page load.** Fine for 2 locations and a handful of equipment types each. With a large catalog, this should move to a searchable `Autocomplete` with server-side pagination instead of loading everything up front.
+- **Known MUI console warning:** closing the date picker dialog can trigger a benign `aria-hidden`/focus-retention warning from MUI's `Dialog` — a known interaction between MUI and how focus is returned on close. It doesn't block functionality, but it's a real accessibility smell worth revisiting.
+- **Status chip (Draft/Confirmed) relies on color plus text**, which is fine (color isn't the *only* signal), but an icon would make the distinction faster to scan and more robust for color-blind users.
+- Manual testing covered the happy path and the conflict path (over-booking a confirmed reservation, editing without self-conflict) in the browser; no automated tests, per the assessment's instructions.
 
-## Architecture
+## Production considerations
 
-- `src/app` — App Router pages, loading/error boundaries, and API routes
-- `src/features/reservations` — reservation-list UI and note form
-- `src/schemas` — shared Zod request/form validation
-- `src/server/reservations` — typed reads and reservation domain operations
-- `src/lib` — Prisma client and small shared server utilities
-- `src/types` — shared UI-facing domain types
-- `prisma/schema.prisma` — relational data model
-- `prisma/seed.ts` — deterministic local data
-
-## Candidate Tasks
-
-1. **Fix Reservation Availability.** Correct the existing availability behavior so it follows all documented business rules.
-2. **Implement Create Reservation.** Build the client validation, server mutation, persistence, availability enforcement for confirmed reservations, and appropriate success/error experience.
-
-**Optional bonus:** Edit Reservation. This is not required.
-
-No automated tests are required. Focus on clear production-style code, sound business rules, and useful manual verification.
-
-## Business Rules
-
-- Reservation intervals use `[start, end)` semantics: the start is inclusive and the end is exclusive.
-- Adjacent reservations do not overlap. For example, `09:00–12:00` and `12:00–15:00` can both be reserved.
-- Only `CONFIRMED` reservations consume inventory; `DRAFT` reservations do not.
-- Quantity must be positive.
-- Requested quantity may not exceed the available quantity.
-- Availability is location-specific.
-- The server is authoritative and must re-check availability before confirming a reservation.
-- An unavailable confirmed request must return an actionable domain error, such as: `Only 2 Generators are available for the selected period.`
-
-## Useful Commands
-
-| Command | Purpose |
-| --- | --- |
-| `pnpm dev` | Start the development server |
-| `pnpm build` | Create a production build |
-| `pnpm lint` | Run ESLint |
-| `pnpm typecheck` | Run strict TypeScript checks |
-| `pnpm db:setup` | Generate Prisma, apply the schema, and seed SQLite |
-| `pnpm db:seed` | Reload deterministic seed data |
-| `pnpm db:reset` | Restore deterministic starter data |
-
-## No External Services
-
-No external services, API keys, authentication providers, cloud accounts, paid components, Docker, or private package registries are required.
-
-## Scope
-
-Do not build authentication or user management, payments, invoicing, taxes, accounting, email/SMS, external API integrations, cloud infrastructure, Redis, Datadog, CI/CD, Trigger.dev workflows, microservices, or event sourcing. Edit Reservation is bonus-only, and automated tests are not required.
-
-## Submission
-
-Follow the submission instructions in the assessment document you received.
+- **Concurrent confirmations:** the availability check and the write happen inside the same `prisma.$transaction`, so two confirmations racing for the last unit of equipment can't both read "available" and both succeed. SQLite serializes writes at the file level; on Postgres, the equivalent would be `SELECT ... FOR UPDATE` on the relevant rows, or a serializable isolation level, to get the same guarantee under real concurrency.
+- **Higher traffic / more data:** the availability query already uses an index on `(locationId, status, startAt, endAt)` and batches by equipment to avoid N+1. If a single location/period combination gets hot (many overlapping reservations), the next step would be a maintained aggregate (reserved quantity per equipment per time bucket) updated on write, instead of summing rows on every read — trading write complexity for O(1) reads.
+- **Locations/equipment catalog at scale:** today everything loads on page render. At thousands of equipment types, that becomes a searchable, paginated `Autocomplete` backed by an API endpoint, loaded on demand as the user types.
