@@ -20,12 +20,19 @@ import {
   TextField,
   Typography,
 } from "@mui/material";
-import { useEffect, useRef } from "react";
+import { useRouter } from "next/navigation";
+import { useEffect, useRef, useState } from "react";
 import { useFieldArray, useForm } from "react-hook-form";
 import { createReservationSchema, type CreateReservationInput } from "@/schemas/create-reservation";
 import type { LocationWithEquipment } from "@/server/locations/list-locations";
 
+interface ApiErrorBody {
+  error?: string;
+}
+
 export function CreateReservationForm({ locations }: { locations: LocationWithEquipment[] }) {
+  const router = useRouter();
+  const [serverError, setServerError] = useState<string | null>(null);
   const {
     register,
     control,
@@ -60,9 +67,27 @@ export function CreateReservationForm({ locations }: { locations: LocationWithEq
     }
   }, [selectedLocationId, fields, setValue]);
 
-  function onSubmit(input: CreateReservationInput) {
-    // UI-only for now — no API call yet.
-    console.log("Create reservation submit", input);
+  async function onSubmit(input: CreateReservationInput) {
+    setServerError(null);
+
+    try {
+      const response = await fetch("/api/reservations", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(input),
+      });
+      const body = (await response.json()) as ApiErrorBody;
+
+      if (!response.ok) {
+        setServerError(body.error ?? "The reservation could not be created.");
+        return;
+      }
+
+      router.push("/");
+      router.refresh();
+    } catch {
+      setServerError("The server could not be reached. Please try again.");
+    }
   }
 
   return (
@@ -70,6 +95,12 @@ export function CreateReservationForm({ locations }: { locations: LocationWithEq
       <CardContent>
         <form onSubmit={handleSubmit(onSubmit)} noValidate>
           <Stack spacing={3}>
+            {serverError ? (
+              <Alert severity="error" aria-live="assertive">
+                {serverError}
+              </Alert>
+            ) : null}
+
             <TextField
               {...register("locationId")}
               value={selectedLocationId ?? ""}
