@@ -1,4 +1,4 @@
-# Equipment Reservation — Solution
+# Equipment Reservation - Solution
 
 Take-home assessment: fix reservation availability, implement Create Reservation end-to-end, and (bonus) Edit Reservation.
 
@@ -12,42 +12,38 @@ pnpm db:setup   # generates Prisma client, applies schema, seeds SQLite
 pnpm dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000). No environment variables or external services are required.
-
-To reset the database to the original seed data at any point: `pnpm db:seed`.
+Open [http://localhost:3000](http://localhost:3000). No environment variables or external services needed. Run `pnpm db:seed` anytime to reset the data back to the seed.
 
 ## Assumptions
 
-- No authentication exists, so there is no concept of "logged-in user." `locationId` always comes from an explicit dropdown selection, never inferred.
-- A `DRAFT` reservation can request any quantity, including more than physically exists — it is a placeholder, not a commitment, so it never touches availability. Only `CONFIRMED` reservations are checked and blocked.
-- A reservation's `startAt` cannot be in the past, and cannot be more than one year in the future. This isn't in the PDF; it's a sanity rule I added because nothing else prevented booking decades ahead.
-- The app assumes low traffic and a small catalog (few locations, a handful of equipment types each). Several decisions below trade scalability for simplicity on that basis, and are called out explicitly rather than silently assumed.
+- No auth in this app, so no logged-in user concept. `locationId` always comes from a dropdown, never inferred. No multi-tenancy either; each location's inventory is independent, scoped by `locationId` in every query.
+- `DRAFT` reservations can request any quantity, even more than exists. They're placeholders, not commitments, so they never touch availability. Only `CONFIRMED` reservations get checked.
+- `startAt` can't be in the past or more than a year out. Not in the PDF, added this myself so nothing books decades ahead.
+- Assuming low traffic and a small catalog (few locations, a handful of equipment each). A few decisions below trade scale for simplicity because of that, and I call those out below instead of hiding them.
 
 ## Technical decisions
 
-- **Overlap fix (Ticket 1):** the original query used `lte`/`gte` (inclusive) for the overlap check, so a reservation ending exactly when another begins was incorrectly flagged as a conflict. Changed to strict `lt`/`gt`, matching the `[start, end)` semantics the PDF specifies.
-- **Atomic writes:** `createReservation`/`updateReservation` wrap validation *and* the write in one `prisma.$transaction`. Availability is re-checked with the same transaction client right before writing, so the check and the write see a consistent snapshot — no separate "check now, hope nothing changed" step.
-- **Availability is checked in two places, on purpose:** once client-side while the user is filling the form (a live preview, not authoritative), and once server-side inside the transaction right before commit (the real gate). The client check exists purely for UX; the server never trusts it.
-- **Batched availability, no N+1:** a reservation can have several equipment items. Instead of querying availability once per item, `getAvailableQuantitiesByEquipment` resolves all items in 2 queries total (`equipmentId IN (...)`), regardless of how many items the reservation has. This applies to both the live preview and the server-side check.
-- **Edit reuses Create, not a duplicate form or a HOC:** considered wrapping the form in a higher-order component for the edit case; rejected it as unnecessary indirection for what's really "the same component, one optional prop." `CreateReservationForm` takes an optional `reservation` prop — when present, it pre-fills the form, calls `PUT` instead of `POST`, and the availability check passes `excludeReservationId` so a reservation being edited doesn't conflict with itself.
-- **Live availability preview shows a real number, not just "disabled":** an earlier version just disabled equipment with no capacity left, but gave no reason why — confusing on its own. The dropdown now shows the actual remaining quantity for the selected dates (e.g. "Generator (2 available)"), debounced 400ms with in-flight requests cancelled, so it doesn't fire on every keystroke.
-- **Locations fetched directly from Prisma, no API route:** the new-reservation page is a Server Component, so it calls `listLocationsWithEquipment()` directly — no need to round-trip through an API just to read data the page itself will render. Locations and equipment are fetched together for simplicity; see Trade-offs for why that's a shortcut, not the ideal split.
-- **Date/time input:** used `@mui/x-date-pickers` (free tier, not the paid MUI X components) instead of the native `datetime-local` input, mainly to get a consistent 24h format — the native input's AM/PM-vs-24h display depends on the browser/OS locale, which was confusing during testing.
-- **Server files kept to one-per-concern, not over-split:** `reservation-mutations.ts` holds `createReservation`, `updateReservation`, and their shared validation together, rather than three separate files. For this project's size, three tiny files added navigation overhead without a real benefit — the line was judgment, not a hard rule.
+- **Overlap fix (Ticket 1).** Bug was `lte`/`gte` on the overlap check, so a reservation ending at 12:00 conflicted with one starting at 12:00. Changed to strict `lt`/`gt` to match `[start, end)`.
+- **Atomic writes.** Availability check and the write happen inside the same `prisma.$transaction`, so they see the same snapshot. No separate check-then-write step that could go stale.
+- **No N+1.** A reservation can have several equipment items. Availability for all of them resolves in 2 queries total (`equipmentId IN (...)`), not one query per item.
+- **Two-layer availability check.** Client side while typing (just a preview, debounced 400ms) and server side inside the transaction before commit (the real gate). Quantity must also be a positive integer, checked with Zod on both sides.
+- **Edit reuses Create.** Considered a HOC for the edit case, skipped it, it's really the same form with one optional `reservation` prop. When present: pre-fills the form, submits with `PUT`, and passes `excludeReservationId` to the availability check so editing your own reservation doesn't count against itself.
+- **Live availability preview.** Equipment dropdown shows real remaining quantity for the selected dates (not just the total), so the user isn't guessing. The server still re-validates independently on submit.
+- **Date/time input.** Used `@mui/x-date-pickers` free tier instead of the native `datetime-local` input, mainly for a consistent 24h format (native input's AM/PM display depends on OS locale).
 
 ## Trade-offs / incomplete work
 
-- **No success toast/snackbar.** Tried a Snackbar for "reservation created"/"note saved" a few times and it kept fighting the MUI Dialog's focus/state. Not worth more time against this project's actual grading criteria, so the form just redirects after submit. The one UX gap this leaves: submission is fast enough that the redirect can feel abrupt, with no visible confirmation that anything happened.
-- **API errors aren't a formal standard.** Error responses are `{ error, code }` with a matching HTTP status, which is consistent across endpoints but isn't a spec like RFC 7807 (Problem Details). Fine at this scope; would standardize if the API surface grew or had external consumers.
-- **Locations and equipment are fetched together, not cached separately.** Locations change rarely and could reasonably be cached; equipment can be larger and more dynamic. Fetching both in one call is a simplification that holds at this scale (2 locations, few equipment types) but isn't the ideal long-term split — see Production considerations.
-- **Equipment quantity column ("2x Generator, 1x Saw") in the list table** is a single comma-separated string. Fine at this scale, doesn't scale well visually with many items — a small nested table or chip list would read better.
-- **Known MUI console warning:** closing the date picker dialog can trigger a benign `aria-hidden`/focus-retention warning from MUI's `Dialog` — a known interaction between MUI and how focus is returned on close. Doesn't block functionality, but it's a real accessibility smell worth revisiting given the note below.
-- **Status chip (Draft/Confirmed) relies on color plus text**, which passes WCAG contrast (verified: ~5:1 for the confirmed chip, well above the 4.5:1 AA minimum), but an icon would make the distinction faster to scan and more robust for color-blind users.
-- **Accessibility was reasoned through (labels, `aria-label`, `aria-live`, keyboard-operable MUI components, contrast checked), but not verified end-to-end with an actual screen reader** (VoiceOver/NVDA). That's the honest gap between "should work by convention" and "confirmed working."
-- Manual testing covered the happy path and the conflict path (over-booking a confirmed reservation, editing without self-conflict) in the browser; no automated tests, per the assessment's instructions.
+- No success toast after create/save. Tried a Snackbar a few times, it kept fighting the MUI Dialog's focus handling. Not worth more time given what's actually being graded, so the form just redirects.
+- Locations and equipment load together in one call, no caching. Fine at this scale; locations barely change and equipment could grow, so they'd split at scale.
+- Equipment list in the reservations table is one comma-separated string ("2x Generator, 1x Saw"). Reads fine now, wouldn't scale visually with many items.
+- Known MUI console warning: closing the date picker can trigger a benign `aria-hidden` focus warning from `Dialog`. Doesn't break anything, worth a look before real production use.
+- Status chip (Draft/Confirmed) passes contrast (~5:1, above the 4.5:1 AA minimum) but relies on color plus text only, no icon.
+- Accessibility was built with intent (labels, `aria-label`, `aria-live`, keyboard-operable MUI components, contrast checked) but not verified with an actual screen reader.
+- API errors use a consistent `{ error, code }` shape with matching HTTP status, not a formal spec like RFC 7807. Fine here, would formalize with external consumers.
+- No unit tests or CI, per the assessment's instructions (not required). Tested manually in the browser instead, covering the happy path plus edge cases: over-booking, editing without self-conflict, boundary times, invalid inputs.
 
 ## Production considerations
 
-- **Concurrent confirmations:** the availability check and the write happen inside the same `prisma.$transaction`, so two confirmations racing for the last unit of equipment can't both read "available" and both succeed. SQLite serializes writes at the file level; on Postgres, the equivalent would be `SELECT ... FOR UPDATE` on the relevant rows, or a serializable isolation level, to get the same guarantee under real concurrency.
-- **Higher traffic / more data:** the availability query already uses an index on `(locationId, status, startAt, endAt)` and batches by equipment to avoid N+1. If a single location/period combination gets hot (many overlapping reservations), the next step would be a maintained aggregate (reserved quantity per equipment per time bucket) updated on write, instead of summing rows on every read — trading write complexity for O(1) reads.
-- **Locations/equipment catalog at scale:** today everything loads in one call on page render. With a large catalog this splits into two things: locations cached (they rarely change), and equipment loaded on demand per location via a searchable, paginated `Autocomplete` backed by an API endpoint — not the whole catalog fetched up front.
+- **Concurrent confirmations.** Check + write in one transaction means two people racing for the last unit can't both succeed. SQLite serializes at the file level; on Postgres this would be `SELECT ... FOR UPDATE` or serializable isolation on the same rows.
+- **Higher traffic.** Already indexed on `(locationId, status, startAt, endAt)` and batched to avoid N+1. If one location/period gets hot, next step is a maintained aggregate (reserved quantity per equipment per time bucket) instead of summing rows on every read.
+- **Catalog at scale.** Today everything loads at once. At thousands of equipment types, locations get cached and equipment becomes a searchable, paginated `Autocomplete` loaded on demand.
